@@ -1,231 +1,343 @@
-# A course is a str (Ends-in 3 Nat)
+"""A command-line study tracker that reads and writes courses.txt."""
 
-try:
-    with open("courses.txt", "r") as file:
-        classes = file.read().splitlines()
-except FileNotFoundError:
-    classes = []
-    
-#course_in_file: Course -> Bool
-#Determines wheter a course is already in the text file
-def course_in_text_file(course):
-    course_in_file = False
-            
-    with open("courses.txt", "r") as file:
-        for line in file:
-            if line.strip() == course.strip():
-                course_in_file = True
-                
-    return course_in_file
-
-#course_in_text_file_name: Course -> Course
-#Recursivly determines if a course is in a text file and renames it until it is in the file
-def course_in_text_file_name(course):
-    if not course_in_text_file(course):
-        print("Course Does Not Exist")
-                
-        course_2 = input("What course? ")
-        return course_in_text_file_name(course_2)
-    else:
-        return course
+from dataclasses import dataclass, field
+from datetime import date, datetime
+from pathlib import Path
+from tempfile import NamedTemporaryFile
 
 
-#assignment_in_text_file: Str -> Bool
-#Determines if an assignment is in the text file
-def assignment_in_text_file(assignment):
-    assignment_in_file = False
-    
-    with open("courses.txt", "r") as file:
-        for line in file:
-            if line.strip().lstrip() == assignment.strip():
-                assignment_in_file = True
-            
-    return assignment_in_file
+DATA_FILE = Path(__file__).resolve().with_name("courses.txt")
+DATE_FORMAT = "%d/%m/%Y"
+DESCRIPTION_PREFIX = "Description: "
 
-#assignment_in_text_name: Str -> Str
-#Recursivly determines if an assignment is in a text file and renames it until it is in the file
-def assignment_in_text_file_name(assignment):
-    if not assignment_in_text_file(assignment):
-        print("Assignment Does Not Exist")
-        assignment_2 = input("What Assignment? ")
-        
-        return assignment_in_text_file_name(assignment_2)
-    else:
-        return assignment
-    
 
-#This is a study tracker
-#You can use it to track your courses, assignments, due dates and everything important
+@dataclass
+class Assignment:
+    name: str
+    description: str = ""
+    deadline: date | str | None = None
+    completed: bool = False
 
-while True:
-    choice = input("""
-    =========================================
-                STUDY TRACKER
-    =========================================
 
-    Please select an option by typing a number:
+@dataclass
+class Course:
+    name: str
+    assignments: list[Assignment] = field(default_factory=list)
 
-    1. Course Management
-    2. Assignment Management
-    3. Exit
-    -----------------------------------------
-    """)
 
-#Opens course management options
+def load_courses(path):
+    """Read course blocks from the original indented text format."""
+    try:
+        lines = path.read_text(encoding="utf-8-sig").split("\n")
+    except FileNotFoundError:
+        return []
+
+    courses = []
+    course = None
+    assignment = None
+
+    for line_number, line in enumerate(lines, start=1):
+        value = line.strip()
+        if not value:
+            continue
+
+        indent = len(line) - len(line.lstrip())
+        if indent == 0:
+            course = Course(value)
+            courses.append(course)
+            assignment = None
+        elif indent == 4 and course is not None:
+            assignment = Assignment(value)
+            course.assignments.append(assignment)
+        elif indent == 8 and assignment is not None:
+            if value == "Completed":
+                assignment.completed = True
+            elif value.startswith("Deadline: "):
+                assignment.deadline = parse_saved_deadline(value[len("Deadline: "):])
+            elif assignment.deadline is None:
+                # The old script inserted each new deadline above the previous one.
+                assignment.deadline = parse_saved_deadline(value)
+        elif indent == 12 and assignment is not None and value.startswith("Description:"):
+            assignment.description = value.removeprefix("Description:").strip()
+        else:
+            raise ValueError(f"Unexpected indentation or content on line {line_number}.")
+
+    return courses
+
+
+def parse_saved_deadline(value):
+    try:
+        return datetime.strptime(value, DATE_FORMAT).date()
+    except ValueError:
+        # Older versions accepted free-form deadlines. Keep the text visible.
+        return value
+
+
+def display_deadline(deadline):
+    if isinstance(deadline, date):
+        return deadline.strftime(DATE_FORMAT)
+    if deadline:
+        return f"{deadline} (invalid date)"
+    return "No deadline"
+
+
+def save_courses(path, courses):
+    """Write a complete copy before replacing the previous file."""
+    lines = []
+    for course in courses:
+        lines.append(course.name)
+        for assignment in course.assignments:
+            lines.append(f"    {assignment.name}")
+            if assignment.deadline:
+                deadline = assignment.deadline
+                if isinstance(deadline, date):
+                    deadline = deadline.strftime(DATE_FORMAT)
+                lines.append(f"        Deadline: {deadline}")
+            if assignment.completed:
+                lines.append("        Completed")
+            if assignment.description:
+                lines.append(f"            {DESCRIPTION_PREFIX}{assignment.description}")
+
+    temporary_path = None
+    try:
+        with NamedTemporaryFile(
+            mode="w", encoding="utf-8", dir=path.parent, delete=False
+        ) as file:
+            temporary_path = Path(file.name)
+            file.writelines(f"{line}\n" for line in lines)
+        temporary_path.replace(path)
+    finally:
+        if temporary_path is not None:
+            temporary_path.unlink(missing_ok=True)
+
+
+def matching_name(items, name):
+    return [item for item in items if item.name.casefold() == name.casefold()]
+
+
+def choose_item(items, label):
+    if not items:
+        print(f"No {label.lower()}s found.")
+        return None
+
+    for item in items:
+        print(f"  {item.name}")
+
+    name = input(f"{label} name (Enter to go back): ").strip()
+    if not name:
+        return None
+
+    matches = matching_name(items, name)
+    if not matches:
+        print(f"{label} not found.")
+        return None
+    if len(matches) == 1:
+        return matches[0]
+
+    print(f"Multiple matches for {name}. Choose one:")
+    for number, item in enumerate(matches, start=1):
+        if isinstance(item, Course):
+            detail = f"{len(item.assignments)} assignment(s)"
+        else:
+            deadline = display_deadline(item.deadline)
+            detail = f"{item.description or 'no description'}, {deadline}"
+        print(f"  {number}. {item.name} ({detail})")
+
+    choice = input("Number (Enter to go back): ").strip()
+    try:
+        index = int(choice) - 1
+    except ValueError:
+        return None
+    if 0 <= index < len(matches):
+        return matches[index]
+    print("Invalid selection.")
+    return None
+
+
+def show_assignments(entries):
+    if not entries:
+        print("No assignments to show.")
+        return
+
+    for course, assignment in entries:
+        status = "Completed" if assignment.completed else "Open"
+        deadline = display_deadline(assignment.deadline)
+        print(f"  {course.name} | {assignment.name} | {deadline} | {status}")
+        if assignment.description:
+            print(f"    {assignment.description}")
+
+
+def manage_courses(courses):
+    print("""
+Course Management
+1. Add Course
+2. View All Courses
+3. Delete a Course
+4. Back
+""")
+    choice = input("Select an option: ").strip()
+
     if choice == "1":
-        choice_1 = input("""
-    Please select an option by typing a number:
-            
-    1. Add Course
-    2. View all Courses
-    3. Delete a Course
-    4. Exit
-    ------------------------------------------------------
-    """)
-
-
-#Adds a course to the text file
-        if choice_1 == "1":
-            course = str(input("What course do you want to add? "))
-            classes.append(course)
-
-            with open("courses.txt", "a") as file:
-                file.write(course + "\n")
-
-            print("Course Saved Succesfully")
-
-            break
-
-#Shows all courses in the text file by looking at indentation
-        elif choice_1 == "2":
-            with open("courses.txt", "r") as file:
-                for line in file:
-                    if not line.startswith(" "):
-                        print(line.strip())
-
-            break
-
-#Removes a course from the text file
-        elif choice_1 == "3":
-            rm_course = input("What course do you want to remove? ")
-
-    #Checks if given course is in the text file
-            rm_course = course_in_text_file_name(rm_course)
-
-    #Removes course from text file
-            with open("courses.txt", "r") as file:
-                contents = file.read()
-
-                updated_content = contents.replace(rm_course, "")
-
-                with open("courses.txt", "w") as file:
-                    file.write(updated_content)
-
-            print("Course Removed Succesfully")
-
-            break
-
-#Exits out of loop
-        elif choice_1 == "4":
-            print("Thank you!")
-
-            break
-
-#Opens assignment management options
+        name = input("Course name: ").strip()
+        if not name:
+            print("A course needs a name.")
+        elif matching_name(courses, name):
+            print("That course already exists.")
+        else:
+            courses.append(Course(name))
+            return "Course saved."
     elif choice == "2":
-        choice_2 = input("""
-    Please select an option by typing a number:
-            
-    1. Add an Assignment
-    2. Set an Assignment Deadline
-    3. View all Course Specfic Assignments
-    4. View all Upcoming Assignments
-    5. View all Assignments
-    6. Mark Assignment as Completed
-    7. Delete an Assignment
-    8. Exit
-    ------------------------------------------------------
-    """)
-
-#Adds an assignement to the text file
-        if choice_2 == "1":
-            assignment = input("What is your assignment? ")
-            assignment_desc = input("Breifly describe your assignement: ")
-            assignment_course = input("What course is this assignment for? ")
-
-        #Checks if course is in text file
-
-            assingment_course = course_in_text_file_name(assignment_course)
-                             
-        #Adds assignment to text file
-            with open("courses.txt", "r") as file:
-                lines = file.readlines()
-
-            with open("courses.txt", "w") as file:
-                for line in lines:
-                    file.write(line)
-
-                    if line.strip() == assignment_course:
-                        file.write("    " + assignment + "\n")
-                        file.write("            " + "Description: " + assignment_desc + "\n")
-
-            print("Assignment and Assignment Description Saved Successfully")
-
-            break
-
-#Adds deadlines to assignements in the text file
-        elif choice_2 == "2":
-            assignment = input("What assignment is this for? ")
-            
-            #Checks if assignment is in text file
-            assignment = assignment_in_text_file_name(assignment)
-            
-            assignement_deadline = input("When is your assignment due? (DD/MM/YYYY) ")
-            
-            # Adding deadline to assignment
-            with open("courses.txt", "r") as file:
-                lines = file.readlines()
-            
-            with open("courses.txt", "w") as file:
-                for line in lines:
-                    file.write(line)
-                    
-                    if line.strip().lstrip() == assignment:
-                        file.write("        " + assignement_deadline + "\n")
-                        
-            print("Deadline Added Successfully")
-
-            break
-        
-#View all course-specfic assignments
-        elif choice_2 == "3":
-            
-            course_view = input("What course do you want to see? ")
-            
-            found = False
-            
-            with open("courses.txt", "r") as file:
-                for line in file:
-                    if line.strip() == course_view.strip():
-                        found = True
-                        continue
-                    
-                    if found:
-                        if line.startswith(" "):
-                            print(line)
-                        else:
-                            break
-                    
-            break
-
-#Exits out of loop
-        elif choice_2 == "8":
-            print("Thank you!")
-
-            break
-
-#Exits out of loop
+        if not courses:
+            print("No courses yet.")
+        for course in courses:
+            print(f"  {course.name}")
     elif choice == "3":
-        print("Thank you!")
+        course = choose_item(courses, "Course")
+        if course is not None:
+            answer = input(
+                f"Delete {course.name} and its {len(course.assignments)} assignment(s)? (y/N): "
+            )
+            if answer.strip().lower() == "y":
+                courses[:] = [item for item in courses if item is not course]
+                return "Course deleted."
+    elif choice != "4":
+        print("Choose an option from 1 to 4.")
+    return None
 
-        break
+
+def set_deadline(assignment):
+    while True:
+        value = input("Deadline (DD/MM/YYYY, or Enter to go back): ").strip()
+        if not value:
+            return None
+        try:
+            assignment.deadline = datetime.strptime(value, DATE_FORMAT).date()
+        except ValueError:
+            print("Enter a valid calendar date, such as 05/12/2026.")
+        else:
+            return "Deadline saved."
+
+
+def manage_assignments(courses):
+    print("""
+Assignment Management
+1. Add an Assignment
+2. Set or Update an Assignment Deadline
+3. View Assignments for a Course
+4. View Upcoming Assignments
+5. View All Assignments
+6. Mark an Assignment as Completed
+7. Delete an Assignment
+8. Back
+""")
+    choice = input("Select an option: ").strip()
+
+    if choice in ("4", "5"):
+        entries = [
+            (course, assignment)
+            for course in courses
+            for assignment in course.assignments
+        ]
+        if choice == "4":
+            today = date.today()
+            entries = [
+                (course, assignment)
+                for course, assignment in entries
+                if not assignment.completed
+                and isinstance(assignment.deadline, date)
+                and assignment.deadline >= today
+            ]
+            entries.sort(key=lambda entry: entry[1].deadline)
+        show_assignments(entries)
+        return None
+
+    if choice == "8":
+        return None
+    if choice not in ("1", "2", "3", "6", "7"):
+        print("Choose an option from 1 to 8.")
+        return None
+
+    course = choose_item(courses, "Course")
+    if course is None:
+        return None
+
+    if choice == "1":
+        name = input("Assignment name: ").strip()
+        if not name:
+            print("An assignment needs a name.")
+        elif matching_name(course.assignments, name):
+            print("That assignment already exists in this course.")
+        else:
+            description = input("Description (optional): ").strip()
+            course.assignments.append(Assignment(name, description))
+            return "Assignment saved."
+        return None
+
+    if choice == "3":
+        show_assignments([(course, assignment) for assignment in course.assignments])
+        return None
+
+    assignment = choose_item(course.assignments, "Assignment")
+    if assignment is None:
+        return None
+
+    if choice == "2":
+        return set_deadline(assignment)
+    if choice == "6":
+        if assignment.completed:
+            print("This assignment is already completed.")
+            return None
+        assignment.completed = True
+        return "Assignment marked as completed."
+
+    answer = input(f"Delete {assignment.name} from {course.name}? (y/N): ")
+    if answer.strip().lower() == "y":
+        course.assignments[:] = [item for item in course.assignments if item is not assignment]
+        return "Assignment deleted."
+    return None
+
+
+def main():
+    while True:
+        try:
+            # Reload each time so a failed save cannot leave unsaved changes in the menu.
+            courses = load_courses(DATA_FILE)
+        except (OSError, ValueError) as error:
+            print(f"Could not read {DATA_FILE.name}: {error}")
+            return
+
+        print("""
+=========================================
+              STUDY TRACKER
+=========================================
+1. Course Management
+2. Assignment Management
+3. Exit
+""")
+        choice = input("Select an option: ").strip()
+
+        if choice == "1":
+            message = manage_courses(courses)
+        elif choice == "2":
+            message = manage_assignments(courses)
+        elif choice == "3":
+            print("Thank you!")
+            return
+        else:
+            print("Choose an option from 1 to 3.")
+            continue
+
+        if message:
+            try:
+                save_courses(DATA_FILE, courses)
+            except OSError as error:
+                print(f"Could not save changes: {error}")
+            else:
+                print(message)
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except (EOFError, KeyboardInterrupt):
+        print("\nGoodbye!")
