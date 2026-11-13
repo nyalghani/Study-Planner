@@ -1,0 +1,231 @@
+# A course is a str (Ends-in 3 Nat)
+
+try:
+    with open("courses.txt", "r") as file:
+        classes = file.read().splitlines()
+except FileNotFoundError:
+    classes = []
+    
+#course_in_file: Course -> Bool
+#Determines wheter a course is already in the text file
+def course_in_text_file(course):
+    course_in_file = False
+            
+    with open("courses.txt", "r") as file:
+        for line in file:
+            if line.strip() == course.strip():
+                course_in_file = True
+                
+    return course_in_file
+
+#course_in_text_file_name: Course -> Course
+#Recursivly determines if a course is in a text file and renames it until it is in the file
+def course_in_text_file_name(course):
+    if not course_in_text_file(course):
+        print("Course Does Not Exist")
+                
+        course_2 = input("What course? ")
+        return course_in_text_file_name(course_2)
+    else:
+        return course
+
+
+#assignment_in_text_file: Str -> Bool
+#Determines if an assignment is in the text file
+def assignment_in_text_file(assignment):
+    assignment_in_file = False
+    
+    with open("courses.txt", "r") as file:
+        for line in file:
+            if line.strip().lstrip() == assignment.strip():
+                assignment_in_file = True
+            
+    return assignment_in_file
+
+#assignment_in_text_name: Str -> Str
+#Recursivly determines if an assignment is in a text file and renames it until it is in the file
+def assignment_in_text_file_name(assignment):
+    if not assignment_in_text_file(assignment):
+        print("Assignment Does Not Exist")
+        assignment_2 = input("What Assignment? ")
+        
+        return assignment_in_text_file_name(assignment_2)
+    else:
+        return assignment
+    
+
+#This is a study tracker
+#You can use it to track your courses, assignments, due dates and everything important
+
+while True:
+    choice = input("""
+    =========================================
+                STUDY TRACKER
+    =========================================
+
+    Please select an option by typing a number:
+
+    1. Course Management
+    2. Assignment Management
+    3. Exit
+    -----------------------------------------
+    """)
+
+#Opens course management options
+    if choice == "1":
+        choice_1 = input("""
+    Please select an option by typing a number:
+            
+    1. Add Course
+    2. View all Courses
+    3. Delete a Course
+    4. Exit
+    ------------------------------------------------------
+    """)
+
+
+#Adds a course to the text file
+        if choice_1 == "1":
+            course = str(input("What course do you want to add? "))
+            classes.append(course)
+
+            with open("courses.txt", "a") as file:
+                file.write(course + "\n")
+
+            print("Course Saved Succesfully")
+
+            break
+
+#Shows all courses in the text file by looking at indentation
+        elif choice_1 == "2":
+            with open("courses.txt", "r") as file:
+                for line in file:
+                    if not line.startswith(" "):
+                        print(line.strip())
+
+            break
+
+#Removes a course from the text file
+        elif choice_1 == "3":
+            rm_course = input("What course do you want to remove? ")
+
+    #Checks if given course is in the text file
+            rm_course = course_in_text_file_name(rm_course)
+
+    #Removes course from text file
+            with open("courses.txt", "r") as file:
+                contents = file.read()
+
+                updated_content = contents.replace(rm_course, "")
+
+                with open("courses.txt", "w") as file:
+                    file.write(updated_content)
+
+            print("Course Removed Succesfully")
+
+            break
+
+#Exits out of loop
+        elif choice_1 == "4":
+            print("Thank you!")
+
+            break
+
+#Opens assignment management options
+    elif choice == "2":
+        choice_2 = input("""
+    Please select an option by typing a number:
+            
+    1. Add an Assignment
+    2. Set an Assignment Deadline
+    3. View all Course Specfic Assignments
+    4. View all Upcoming Assignments
+    5. View all Assignments
+    6. Mark Assignment as Completed
+    7. Delete an Assignment
+    8. Exit
+    ------------------------------------------------------
+    """)
+
+#Adds an assignement to the text file
+        if choice_2 == "1":
+            assignment = input("What is your assignment? ")
+            assignment_desc = input("Breifly describe your assignement: ")
+            assignment_course = input("What course is this assignment for? ")
+
+        #Checks if course is in text file
+
+            assingment_course = course_in_text_file_name(assignment_course)
+                             
+        #Adds assignment to text file
+            with open("courses.txt", "r") as file:
+                lines = file.readlines()
+
+            with open("courses.txt", "w") as file:
+                for line in lines:
+                    file.write(line)
+
+                    if line.strip() == assignment_course:
+                        file.write("    " + assignment + "\n")
+                        file.write("            " + "Description: " + assignment_desc + "\n")
+
+            print("Assignment and Assignment Description Saved Successfully")
+
+            break
+
+#Adds deadlines to assignements in the text file
+        elif choice_2 == "2":
+            assignment = input("What assignment is this for? ")
+            
+            #Checks if assignment is in text file
+            assignment = assignment_in_text_file_name(assignment)
+            
+            assignement_deadline = input("When is your assignment due? (DD/MM/YYYY) ")
+            
+            # Adding deadline to assignment
+            with open("courses.txt", "r") as file:
+                lines = file.readlines()
+            
+            with open("courses.txt", "w") as file:
+                for line in lines:
+                    file.write(line)
+                    
+                    if line.strip().lstrip() == assignment:
+                        file.write("        " + assignement_deadline + "\n")
+                        
+            print("Deadline Added Successfully")
+
+            break
+        
+#View all course-specfic assignments
+        elif choice_2 == "3":
+            
+            course_view = input("What course do you want to see? ")
+            
+            found = False
+            
+            with open("courses.txt", "r") as file:
+                for line in file:
+                    if line.strip() == course_view.strip():
+                        found = True
+                        continue
+                    
+                    if found:
+                        if line.startswith(" "):
+                            print(line)
+                        else:
+                            break
+                    
+            break
+
+#Exits out of loop
+        elif choice_2 == "8":
+            print("Thank you!")
+
+            break
+
+#Exits out of loop
+    elif choice == "3":
+        print("Thank you!")
+
+        break
