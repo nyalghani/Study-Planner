@@ -1,0 +1,296 @@
+"""Unit testing using pytest for study tracker"""
+
+import pytest
+import study_tracker
+from dataclasses import dataclass, field
+from datetime import date
+
+#A assignment is a str
+#A deadline is (anyof 'Completed' 'Deadline: 'str none)
+@dataclass
+class Assignment:
+    name: str
+    description: str = ""
+    deadline: date | str | None = None
+    completed: bool = False
+
+#A course is a
+#str ends-in 3 Nat
+@dataclass
+class Course:
+    name: str
+    assignments: list[Assignment] = field(default_factory=list)
+
+def test_load_courses(mocker):
+    path = mocker.Mock()
+    
+    path.read_text.return_value = "Math 135\n"
+    result = study_tracker.load_courses(path)
+    
+    assert len(result) == 1
+    
+    course = result[0]
+    assert course.name == 'Math 135'
+    assert course.assignments == []
+    path.read_text.assert_called_once_with(encoding="utf-8-sig")
+    
+def test_load_courses_with_assignment(mocker):
+    path = mocker.Mock()
+    
+    path.read_text.return_value = "CS 135\n    A08"
+    result = study_tracker.load_courses(path)
+    
+    course = result[0]
+    assignment = course.assignments[0]
+    assert course.name == 'CS 135'
+    assert assignment.name == 'A08'
+    assert assignment.deadline == None
+    path.read_text.assert_called_once_with(encoding="utf-8-sig")
+    
+def test_load_courses_with_assignment_and_deadline_not_completed(mocker):
+    path = mocker.Mock()
+    path.read_text.return_value = "CS 135\n    A08\n        Deadline: 16/11/2026"
+    result = study_tracker.load_courses(path)
+    
+    course = result[0]
+    assignment = course.assignments[0]
+    
+    assert course.name == 'CS 135'
+    assert assignment.name == 'A08'
+    assert assignment.deadline == date(2026, 11, 16)
+    assert assignment.completed == False
+
+def test_load_courses_with_assignment_and_deadline_completed(mocker):
+    path = mocker.Mock()
+    
+    path.read_text.return_value = "CS 135\n    A08\n        Deadline: 16/11/2026\n        Completed"
+    result = study_tracker.load_courses(path)
+    
+    course = result[0]
+    assignment = course.assignments[0]
+
+    assert course.name == 'CS 135'
+    assert assignment.name == 'A08'
+    assert assignment.deadline == date(2026, 11, 16)
+    assert assignment.completed == True
+    
+def test_load_courses_with_FileNotFoundError(mocker):
+    path = mocker.Mock()
+    
+    path.read_text.return_values = None
+    path.read_text.side_effect = FileNotFoundError
+    result = study_tracker.load_courses(path)
+    
+    assert result == []
+    
+def test_parse_saved_deadline():
+    assert study_tracker.parse_saved_deadline("16/11/2026") == date(2026, 11, 16)
+    assert study_tracker.parse_saved_deadline("19/11/1001") == date(1001, 11, 19)
+    assert study_tracker.parse_saved_deadline("16/8/2026") == date(2026, 8, 16)
+    assert study_tracker.parse_saved_deadline("Completed") == "Completed"
+    assert study_tracker.parse_saved_deadline("HI") == "HI"
+    
+def test_display_deadline():
+    assert study_tracker.display_deadline(date(2026, 11, 16)) == "16/11/2026"
+    assert study_tracker.display_deadline(True) == "True (invalid date)"
+    assert study_tracker.display_deadline(None) == "No deadline"
+def test_load_courses_with_invalid_saved_deadline(mocker):
+    path = mocker.Mock()
+
+    path.read_text.return_value = "CS 135\n    A08\n        Deadline: 31/11/2026"
+    result = study_tracker.load_courses(path)
+
+    assignment = result[0].assignments[0]
+
+    assert assignment.deadline == "31/11/2026"
+    assert study_tracker.display_deadline(assignment.deadline) == "31/11/2026 (invalid date)"
+    assert assignment.completed is False
+
+
+def test_load_courses_with_assignment_before_course(mocker):
+    path = mocker.Mock()
+
+    path.read_text.return_value = "\n    A08"
+
+    with pytest.raises(ValueError, match="Unexpected indentation or content on line 2"):
+        study_tracker.load_courses(path)
+
+
+def test_parse_saved_deadline_with_leap_days():
+    assert study_tracker.parse_saved_deadline("29/02/2024") == date(2024, 2, 29)
+    assert study_tracker.parse_saved_deadline("29/02/2026") == "29/02/2026"
+
+
+def test_save_courses_when_data_file_is_missing(tmp_path):
+    path = tmp_path / "courses.txt"
+    assignment = study_tracker.Assignment("A08", "List recursion", date(2026, 11, 16), True)
+    courses = [study_tracker.Course("CS 135", [assignment])]
+
+    assert path.exists() is False
+    assert study_tracker.load_courses(path) == []
+
+    study_tracker.save_courses(path, courses)
+    result = study_tracker.load_courses(path)
+
+    assert len(result) == 1
+    assert result[0].name == "CS 135"
+    assert len(result[0].assignments) == 1
+
+    saved_assignment = result[0].assignments[0]
+    assert saved_assignment.name == "A08"
+    assert saved_assignment.description == "List recursion"
+    assert saved_assignment.deadline == date(2026, 11, 16)
+    assert saved_assignment.completed is True
+def test_save_courses_when_replace_fails(tmp_path, mocker):
+    path = tmp_path / "courses.txt"
+    path.write_text("Math 135\n", encoding="utf-8")
+    courses = [study_tracker.Course("CS 135")]
+    mocker.patch("study_tracker.Path.replace", side_effect=PermissionError)
+
+    with pytest.raises(PermissionError):
+        study_tracker.save_courses(path, courses)
+
+    assert path.read_text(encoding="utf-8") == "Math 135\n"
+    assert list(tmp_path.iterdir()) == [path]
+
+
+def test_load_courses_with_duplicate_entries(mocker):
+    path = mocker.Mock()
+
+    path.read_text.return_value = (
+        "CS 135\n"
+        "    A08\n"
+        "        Deadline: 16/11/2026\n"
+        "    a08\n"
+        "        Deadline: 18/11/2026\n"
+        "cs 135\n"
+        "    A09\n"
+    )
+    result = study_tracker.load_courses(path)
+
+    assert len(result) == 2
+    assert result[0].name == "CS 135"
+    assert result[1].name == "cs 135"
+    assert len(result[0].assignments) == 2
+    assert result[0].assignments[0].name == "A08"
+    assert result[0].assignments[0].deadline == date(2026, 11, 16)
+    assert result[0].assignments[1].name == "a08"
+    assert result[0].assignments[1].deadline == date(2026, 11, 18)
+    assert len(result[1].assignments) == 1
+    assert result[1].assignments[0].name == "A09"
+
+
+def test_matching_name_with_duplicate_names():
+    first = study_tracker.Course("CS 135")
+    second = study_tracker.Course("cs 135")
+    courses = [first, study_tracker.Course("Math 135"), second]
+
+    result = study_tracker.matching_name(courses, "Cs 135")
+
+    assert len(result) == 2
+    assert result[0] is first
+    assert result[1] is second
+
+
+def test_manage_courses_with_duplicate_course(mocker, capsys):
+    course = study_tracker.Course("CS 135")
+    courses = [course]
+    mocker.patch("builtins.input", side_effect=["1", " cs 135 "])
+
+    result = study_tracker.manage_courses(courses)
+
+    assert result is None
+    assert len(courses) == 1
+    assert courses[0] is course
+    assert "That course already exists." in capsys.readouterr().out
+
+
+def test_manage_assignments_with_duplicate_assignment(mocker, capsys):
+    assignment = study_tracker.Assignment("A08")
+    course = study_tracker.Course("CS 135", [assignment])
+    mocker.patch("builtins.input", side_effect=["1", "CS 135", " a08 "])
+
+    result = study_tracker.manage_assignments([course])
+
+    assert result is None
+    assert len(course.assignments) == 1
+    assert course.assignments[0] is assignment
+    assert "That assignment already exists in this course." in capsys.readouterr().out
+    
+    
+def test_manage_assignments_with_same_name_in_different_courses(mocker):
+    first = study_tracker.Course("CS 135", [study_tracker.Assignment("A08")])
+    second = study_tracker.Course("Math 135")
+    mocker.patch("builtins.input", side_effect=["1", "Math 135", "A08", ""])
+
+    result = study_tracker.manage_assignments([first, second])
+
+    assert result == "Assignment saved."
+    assert len(first.assignments) == 1
+    assert len(second.assignments) == 1
+    assert second.assignments[0].name == "A08"
+
+
+def test_choose_item_with_duplicate_assignment_names(mocker):
+    first = study_tracker.Assignment("A08", "Lists")
+    second = study_tracker.Assignment("a08", "Trees")
+    mocker.patch("builtins.input", side_effect=["A08", "2"])
+
+    result = study_tracker.choose_item([first, second], "Assignment")
+
+    assert result is second
+
+
+def test_choose_item_with_duplicate_names_and_invalid_selection(mocker, capsys):
+    courses = [study_tracker.Course("CS 135"), study_tracker.Course("cs 135")]
+    mocker.patch("builtins.input", side_effect=["CS 135", "0"])
+
+    result = study_tracker.choose_item(courses, "Course")
+
+    assert result is None
+    assert "Invalid selection." in capsys.readouterr().out
+
+
+def test_set_deadline_with_invalid_date_then_valid_date(mocker, capsys):
+    assignment = study_tracker.Assignment("A08")
+    mocker.patch("builtins.input", side_effect=["31/11/2026", "30/11/2026"])
+
+    result = study_tracker.set_deadline(assignment)
+
+    assert result == "Deadline saved."
+    assert assignment.deadline == date(2026, 11, 30)
+    assert "Enter a valid calendar date" in capsys.readouterr().out
+
+
+def test_set_deadline_with_invalid_date_then_cancel(mocker):
+    assignment = study_tracker.Assignment("A08", deadline=date(2026, 11, 16))
+    mocker.patch("builtins.input", side_effect=["29/02/2026", ""])
+
+    result = study_tracker.set_deadline(assignment)
+
+    assert result is None
+    assert assignment.deadline == date(2026, 11, 16)
+
+
+def test_manage_assignments_with_upcoming_deadlines(mocker):
+    class FixedDate(date):
+        @classmethod
+        def today(cls):
+            return cls(2026, 11, 16)
+
+    course = study_tracker.Course("CS 135")
+    later = study_tracker.Assignment("A10", deadline=FixedDate(2026, 11, 20))
+    today = study_tracker.Assignment("A08", deadline=FixedDate(2026, 11, 16))
+    past = study_tracker.Assignment("A07", deadline=FixedDate(2026, 11, 15))
+    invalid = study_tracker.Assignment("A09", deadline="31/11/2026")
+    no_deadline = study_tracker.Assignment("A11")
+    completed = study_tracker.Assignment("A12", deadline=FixedDate(2026, 11, 17), completed=True)
+    course.assignments = [later, past, invalid, no_deadline, completed, today]
+
+    mocker.patch("study_tracker.date", FixedDate)
+    mocker.patch("builtins.input", return_value="4")
+    show_assignments = mocker.patch("study_tracker.show_assignments")
+
+    study_tracker.manage_assignments([course])
+
+    show_assignments.assert_called_once_with([(course, today), (course, later)])
