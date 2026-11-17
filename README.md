@@ -24,3 +24,18 @@ To try it out, add a course such as `CS 135`, then add an assignment and set its
 ## How it works
 
 The tracker stores data in `courses.txt` next to the script. It creates the file when you save your first course. Assignments are stored under their course, so two courses can each have an assignment named `Quiz 1`. When saving changes, the app writes to a temporary file before replacing `courses.txt` so an interrupted write doesn’t leave a partially written save.
+
+## Testing
+
+The test suite uses `pytest` and `pytest-mock` to check that the study tracker loads
+and saves courses correctly. It covers invalid deadlines, missing data files,
+duplicate course and assignment names, and failed saves.
+
+From the project folder, install the test dependencies and run the suite:
+
+```bash
+python -m pip install pytest pytest-mock
+python -m pytest test_study_tracker.py -q
+```
+
+See [`test_study_tracker.py`](test_study_tracker.py) for the full test suite.
